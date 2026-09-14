@@ -63,3 +63,6 @@ apps/web/src/styles_bkup.css
 
 # Downloaded security master data
 services/scanner/security_master/
+
+# Generated scanner runtime configuration
+apps/controller/public/runtime_scan_config.json

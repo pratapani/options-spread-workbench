@@ -6,13 +6,9 @@ import {fileURLToPath} from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, 'public');
-const REMOTE_DIR_DEFAULT = '/home/ec2-user/option-scanner';
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
-const SCANNER_PATH = path.join(PROJECT_ROOT, 'services', 'scanner');
-const RESTART_IF_RUNNING = !['0','false','no','off'].includes(String(process.env.BPS_EC2_RESTART_IF_RUNNING ?? 'true').toLowerCase());
+const REMOTE_DIR_DEFAULT = '/home/ec2-user/option-scanner';
 
-// Load the local .env without adding a runtime dependency. Only scanner
-// credentials are ever copied to EC2; AWS/SSH settings stay on Windows.
 function loadLocalEnv(){
   const file=path.join(PROJECT_ROOT,'.env');
   if(!fs.existsSync(file)) return;
@@ -23,16 +19,16 @@ function loadLocalEnv(){
     if(!match) continue;
     const name=match[1];
     let value=match[2].trim();
-    if((value.startsWith('"')&&value.endsWith('"')) || (value.startsWith("'")&&value.endsWith("'"))) value=value.slice(1,-1);
+    if((value.startsWith('"')&&value.endsWith('"')) ||
+       (value.startsWith("'")&&value.endsWith("'"))){
+      value=value.slice(1,-1);
+    }
     if(process.env[name]===undefined) process.env[name]=value;
   }
 }
+
 loadLocalEnv();
-function strategyMeta(strategy){
-  const key=String(strategy||'BULL_PUT').toUpperCase();
-  if(key==='BEAR_CALL') return {key, file:'bcs_results.csv', latest:'latest_bcs_results.csv', label:'Bear Call Spread'};
-  return {key:'BULL_PUT', file:'bps_results.csv', latest:'latest_bps_results.csv', label:'Bull Put Spread'};
-}
+
 const PORT = Number(process.env.BPS_CONTROLLER_PORT || 8787);
 
 let state = {running:false, status:'idle', message:'Ready', lines:[], startedAt:null, finishedAt:null, resultFile:null, error:null};
@@ -213,19 +209,7 @@ async function ensureEc2Ready(cfg){
   }else if(status==='pending'){
     log('EC2 is already starting — waiting...');
   }else if(status==='running'){
-    if(RESTART_IF_RUNNING){
-      state.status='ec2';state.message='Restarting EC2 instance';
-      log('EC2 is already running — restarting it for a clean scanner session...');
-      await run(aws,[...awsBaseArgs(),'ec2','stop-instances','--instance-ids',instanceId,'--query','StoppingInstances[0].CurrentState.Name','--output','text']);
-      log('✓ EC2 stop requested');
-      await run(aws,[...awsBaseArgs(),'ec2','wait','instance-stopped','--instance-ids',instanceId]);
-      log('✓ EC2 instance is stopped');
-      await run(aws,[...awsBaseArgs(),'ec2','start-instances','--instance-ids',instanceId,'--query','StartingInstances[0].CurrentState.Name','--output','text']);
-      log('✓ EC2 start requested');
-      status='stopped';
-    }else{
-      log('✓ EC2 is already running');
-    }
+    log('✓ EC2 is already running');
   }else if(status==='stopping'){
     throw new Error('EC2 is stopping. Please wait for it to stop and run the scan again.');
   }else if(status==='shutting-down'){
@@ -260,6 +244,56 @@ async function ensureEc2Ready(cfg){
   return currentHost;
 }
 
+
+async function stopEc2InstanceAndWait(cfg){
+  const instanceId=process.env.BPS_EC2_INSTANCE_ID || cfg.instanceId || 'i-05a5ee6857acfb59f';
+  const aws=awsCliPath();
+
+  state.status='stopping';state.message='Stopping EC2 instance';
+  log(`Stopping EC2 instance after scan: ${instanceId}`);
+
+  const result=await run(aws,[
+    ...awsBaseArgs(),
+    'ec2','describe-instances',
+    '--instance-ids',instanceId,
+    '--query','Reservations[0].Instances[0].State.Name',
+    '--output','text'
+  ]);
+
+  const status=String(result.out||'').trim().split(/\r?\n/).filter(Boolean).pop()||'unknown';
+  log(`EC2 status before shutdown: ${status}`);
+
+  if(status==='stopped'){
+    log('✓ EC2 is already stopped');
+    return;
+  }
+
+  if(status==='stopping'){
+    log('EC2 is already stopping — waiting for stopped state...');
+    await run(aws,[...awsBaseArgs(),'ec2','wait','instance-stopped','--instance-ids',instanceId]);
+    log('✓ EC2 instance stopped');
+    return;
+  }
+
+  if(status!=='running'){
+    throw new Error(`Unable to safely stop EC2. Current state: ${status}`);
+  }
+
+  await run(aws,[
+    ...awsBaseArgs(),
+    'ec2','stop-instances',
+    '--instance-ids',instanceId,
+    '--query','StoppingInstances[0].CurrentState.Name',
+    '--output','text'
+  ]);
+
+  log('✓ EC2 stop requested');
+  log('Waiting for EC2 to reach stopped state...');
+
+  await run(aws,[...awsBaseArgs(),'ec2','wait','instance-stopped','--instance-ids',instanceId]);
+  log('✓ EC2 instance stopped');
+}
+
 async function waitForSsh(host,user,key){
   state.status='connecting';state.message='Waiting for SSH';
   log(`Waiting for SSH on ${host}:22...`);
@@ -291,167 +325,119 @@ async function waitForSsh(host,user,key){
   throw new Error(`EC2 is running but SSH is not reachable after ${attempts*5} seconds. ${lastError?.message||''}`);
 }
 
-function scannerFiles(){
-  const names=[
-    'bps_engine.py',
-    'credit_spread_engine.py',
-    'scan_universe.py',
-    'scan_config.json',
-    'requirements.txt',
-    'download_security_master.py'
-  ];
-  const files=names.map(name=>({local:path.join(SCANNER_PATH,name),remote:name}));
-  const strategyDir=path.join(SCANNER_PATH,'strategies');
-  for(const name of ['__init__.py','bull_put.py','bear_call.py']) files.push({local:path.join(strategyDir,name),remote:`strategies/${name}`});
-  const lotFile=path.join(SCANNER_PATH,'stock_lot.csv');
-  if(fs.existsSync(lotFile)) files.push({local:lotFile,remote:'stock_lot.csv'});
-  return files.filter(x=>fs.existsSync(x.local));
-}
-
-function scannerEnv(){
-  const names=['BREEZE_API_KEY','BREEZE_API_SECRET','BREEZE_SESSION_TOKEN','SMTP_HOST','SMTP_PORT','SMTP_USER','SMTP_PASSWORD'];
-  const values=[];
-  for(const name of names){
-    const value=process.env[name];
-    if(value!==undefined && value!=='') values.push(`${name}=${value}`);
-  }
-  return values;
-}
-
-async function uploadScanner(cfg,host,user,key,remoteDir){
-  const files=scannerFiles();
-  if(!files.some(x=>x.remote==='scan_universe.py')) throw new Error('Local scanner files are incomplete: scan_universe.py is missing.');
-  state.status='uploading';state.message='Deploying scanner to EC2';
-  log(`Preparing scanner in ${remoteDir}`);
-  await run('ssh',['-o','ConnectTimeout=12','-i',key,`${user}@${host}`,`mkdir -p ${remoteDir}/strategies ${remoteDir}/backups`]);
-
-  const localPaths=files.map(x=>x.local);
-  const remoteBase=`${user}@${host}:${remoteDir}/`;
-  await run('scp',['-q','-o','ConnectTimeout=12','-i',key,...localPaths,remoteBase]);
-  // Strategy files need to land in the strategies directory.
-  for(const item of files.filter(x=>x.remote.startsWith('strategies/'))){
-    await run('scp',['-q','-o','ConnectTimeout=12','-i',key,item.local,`${user}@${host}:${remoteDir}/${item.remote}`]);
-  }
-  // Preserve the current lot-size master when the new folder does not have one.
-  await run('ssh',['-o','ConnectTimeout=12','-i',key,`${user}@${host}`,`if [ ! -f ${remoteDir}/stock_lot.csv ] && [ -f /home/ec2-user/bps-scanner/stock_lot.csv ]; then cp /home/ec2-user/bps-scanner/stock_lot.csv ${remoteDir}/stock_lot.csv; echo '✓ Existing lot-size master copied'; fi`]);
-  log(`✓ Scanner files deployed (${files.length} files)`);
-}
-
-async function ensureScannerEnv(cfg,host,user,key,remoteDir){
-  loadLocalEnv();
-  const envValues=scannerEnv();
-  const hasLocalApi=envValues.some(x=>x.startsWith('BREEZE_API_KEY=')) && envValues.some(x=>x.startsWith('BREEZE_API_SECRET='));
-  const localToken=cfg.sessionToken?.trim() || envValues.find(x=>x.startsWith('BREEZE_SESSION_TOKEN='))?.slice('BREEZE_SESSION_TOKEN='.length) || '';
-
-  state.status='environment';state.message='Checking Breeze credentials';
-
-  // Prefer the Windows .env when complete. Otherwise retain an already-valid
-  // EC2 .env in the new scanner directory. No legacy-directory terminology is
-  // exposed to the UI.
-  if(hasLocalApi && localToken){
-    const values=envValues.filter(x=>!x.startsWith('BREEZE_SESSION_TOKEN='));
-    values.push(`BREEZE_SESSION_TOKEN=${localToken}`);
-    const envFile=path.join(PUBLIC,'.scanner.env.tmp');
-    fs.writeFileSync(envFile,values.join('\n')+'\n','utf8');
-    try{
-      await run('scp',['-q','-o','ConnectTimeout=12','-i',key,envFile,`${user}@${host}:${remoteDir}/.env.new`]);
-      await run('ssh',['-o','ConnectTimeout=12','-i',key,`${user}@${host}`,`cd ${remoteDir} && mv .env.new .env && chmod 600 .env && grep -q '^BREEZE_API_KEY=' .env && grep -q '^BREEZE_API_SECRET=' .env && grep -q '^BREEZE_SESSION_TOKEN=' .env`]);
-    }finally{try{fs.unlinkSync(envFile)}catch{}}
-    log('✓ Breeze .env refreshed in option-scanner');
-    return;
-  }
-
-  // If the Windows .env does not contain a complete credential set, retain
-  // the already configured EC2-side .env. This avoids unnecessary migration
-  // or credential prompts when the scanner is already provisioned.
-  //
-  // No complete Windows credentials: verify the EC2-side environment that
-  // was already configured for the scanner.
-  const check=`cd ${remoteDir} && test -f .env && chmod 600 .env && grep -q '^BREEZE_API_KEY=' .env && grep -q '^BREEZE_API_SECRET=' .env && grep -q '^BREEZE_SESSION_TOKEN=' .env`;
-  try{
-    await run('ssh',['-o','ConnectTimeout=12','-i',key,`${user}@${host}`,check]);
-    log('✓ Breeze .env already configured in option-scanner');
-  }catch{
-    throw new Error('Breeze credentials are not configured. Add BREEZE_API_KEY, BREEZE_API_SECRET and BREEZE_SESSION_TOKEN to the Windows .env or configure .env in /home/ec2-user/option-scanner.');
-  }
-}
-async function ensurePythonEnv(host,user,key,remoteDir){
-  state.status='environment';state.message='Preparing Python environment';
-  const cmd=`cd ${remoteDir} && if [ ! -x .venv/bin/python ]; then python3 -m venv .venv; fi && if [ ! -f .requirements.sha256 ] || [ "$(sha256sum requirements.txt | awk '{print $1}')" != "$(cat .requirements.sha256 2>/dev/null)" ]; then .venv/bin/pip install -r requirements.txt && sha256sum requirements.txt | awk '{print $1}' > .requirements.sha256; else echo '✓ Python requirements already up to date'; fi`;
-  await run('ssh',['-o','ConnectTimeout=12','-i',key,`${user}@${host}`,cmd]);
-  log('✓ Python environment ready');
-}
-
-async function prepareEc2(cfg){
+async function doScan(cfg){
   const user=cfg.user || 'ec2-user';
+  if(typeof cfg.expiry!=='string' || !cfg.expiry.trim()){
+    throw new Error('Expiry date is required. Select an expiry before running the scan.');
+  }
   const key=cfg.keyPath;
   const remoteDir=cfg.remoteDir || REMOTE_DIR_DEFAULT;
   if(!key) throw new Error('SSH key path is required.');
   if(!fs.existsSync(key)) throw new Error(`SSH key not found: ${key}`);
   fs.mkdirSync(PUBLIC,{recursive:true});
-  const host=await ensureEc2Ready(cfg);
-  await ensureSshAccess(cfg);
-  await waitForSsh(host,user,key);
-  await uploadScanner(cfg,host,user,key,remoteDir);
-  await ensureScannerEnv(cfg,host,user,key,remoteDir);
-  await ensurePythonEnv(host,user,key,remoteDir);
-  return {host,user,key,remoteDir};
-}
 
-async function doScan(cfg){
-  const meta=strategyMeta(cfg.strategy);
-  if(typeof cfg.expiry!=='string' || !cfg.expiry.trim()) throw new Error('Expiry date is required. Select an expiry before running the scan.');
   const runtimeConfig={
-    strategy:meta.key,
     min_otm_percent:Number(cfg.minOtm), max_otm_percent:Number(cfg.maxOtm),
     max_spread_width:Number(cfg.maxWidth), min_profit_to_loss:Number(cfg.minPL),
     max_profit_to_loss:Number(cfg.maxPL), min_oi:Number(cfg.minOI), min_volume:Number(cfg.minVolume),
     expiry:formatExpiry(cfg.expiry)
   };
-  const configFile=path.join(PUBLIC,'runtime_scan_config.json');
+  const configFile=path.join(__dirname,'public','runtime_scan_config.json');
   fs.writeFileSync(configFile,JSON.stringify(runtimeConfig,null,2));
 
-  const ready=await prepareEc2(cfg);
-  const {host,user,key,remoteDir}=ready;
+  // Ensure the EC2 instance is running even when the scan is launched
+  // directly from the dashboard while the instance is stopped.
+  const host=await ensureEc2Ready(cfg);
+  await ensureSshAccess(cfg);
+  await waitForSsh(host,user,key);
+
+  state.status='uploading';state.message='Uploading scan configuration';
   await run('scp',['-q','-o','ConnectTimeout=12','-i',key,configFile,`${user}@${host}:${remoteDir}/scan_config.json`]);
   log('✓ Scan configuration uploaded');
+
+  if(cfg.sessionToken?.trim()){
+    const tokenFile=path.join(__dirname,'public','.bps_session_token.tmp');
+    fs.writeFileSync(tokenFile,cfg.sessionToken.trim(),'utf8');
+
+    try{
+      const remoteToken='/tmp/bps_session_token';
+
+      // Upload fresh token to EC2 temporarily
+      await run('scp',[
+        '-q',
+        '-o','ConnectTimeout=12',
+        '-i',key,
+        tokenFile,
+        `${user}@${host}:${remoteToken}`
+      ]);
+
+      // Replace ONLY BREEZE_SESSION_TOKEN in EC2 .env
+      const updateEnvCmd =
+        `cd ${remoteDir} && ` +
+        `source .venv/bin/activate && ` +
+        `python -c "from pathlib import Path; ` +
+        `p=Path('.env'); ` +
+        `t=Path('${remoteToken}').read_text(encoding='utf-8').strip(); ` +
+        `lines=p.read_text(encoding='utf-8').splitlines() if p.exists() else []; ` +
+        `lines=[x for x in lines if not x.startswith('BREEZE_SESSION_TOKEN=')]; ` +
+        `lines.append('BREEZE_SESSION_TOKEN='+t); ` +
+        `p.write_text('\\\\n'.join(lines)+'\\\\n',encoding='utf-8')" && ` +
+        `rm -f ${remoteToken} && ` +
+        `grep -q '^BREEZE_SESSION_TOKEN=' .env`;
+
+      await run('ssh',[
+        '-o','ConnectTimeout=12',
+        '-i',key,
+        `${user}@${host}`,
+        updateEnvCmd
+      ]);
+
+      log('✓ Session token updated in EC2 .env');
+
+    } finally {
+      try{fs.unlinkSync(tokenFile)}catch{}
+    }
+  }
 
   state.status='scanning';state.message='Running scanner';
   await run('ssh',['-o','ConnectTimeout=12','-i',key,`${user}@${host}`,`cd ${remoteDir} && source .venv/bin/activate && python scan_universe.py`]);
   log('✓ Scanner finished');
 
   state.status='downloading';state.message='Copying results to Windows';
-  const archiveName=`${meta.key}_${archiveExpiry(runtimeConfig.expiry)}_${archiveStamp()}.csv`;
+  const archiveName=`ExpiryData_${archiveExpiry(runtimeConfig.expiry)}_${archiveStamp()}.csv`;
   const archiveTarget=path.join(PUBLIC,archiveName);
-  await run('scp',['-q','-o','ConnectTimeout=12','-i',key,`${user}@${host}:${remoteDir}/${meta.file}`,archiveTarget]);
+  await run('scp',['-q','-o','ConnectTimeout=12','-i',key,`${user}@${host}:${remoteDir}/bps_results.csv`,archiveTarget]);
   state.resultFile=archiveName;
   log(`✓ Archived results copied to ${archiveTarget}`);
 
-  const target=path.join(PUBLIC,meta.latest);
+  const target=path.join(PUBLIC,'latest_bps_results.csv');
   try{
     fs.copyFileSync(archiveTarget,target);
     log(`✓ Latest results copied to ${target}`);
   }catch(error){
     log(`⚠ Latest results not updated; close the open CSV and refresh: ${error.message}`);
   }
-  state.status='complete';state.message='Scan complete';
-}
+  // Stop EC2 only after the scan and CSV generation/download have completed.
+  await stopEc2InstanceAndWait(cfg);
 
-function uiConfig(){
-  loadLocalEnv();
-  return {
-    host:process.env.BPS_EC2_HOST||'',
-    user:process.env.BPS_EC2_USER||'ec2-user',
-    keyPath:process.env.BPS_EC2_KEY_PATH||'',
-    remoteDir:process.env.BPS_EC2_REMOTE_DIR||REMOTE_DIR_DEFAULT,
-    instanceId:process.env.BPS_EC2_INSTANCE_ID||'',
-    securityGroupId:process.env.BPS_EC2_SECURITY_GROUP_ID||'',
-    region:process.env.BPS_AWS_REGION||''
-  };
+  state.status='complete';state.message='Scan complete';
 }
 
 const server=http.createServer(async(req,res)=>{
   if(req.method==='OPTIONS'){res.writeHead(204,{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,POST,OPTIONS','Access-Control-Allow-Headers':'Content-Type'});return res.end()}
+  if(req.url==='/api/config'&&req.method==='GET'){
+    loadLocalEnv();
+    return json(res,{
+      host:process.env.BPS_EC2_HOST||'',
+      user:process.env.BPS_EC2_USER||'ec2-user',
+      keyPath:process.env.BPS_EC2_KEY_PATH||'',
+      remoteDir:process.env.BPS_EC2_REMOTE_DIR||REMOTE_DIR_DEFAULT,
+      instanceId:process.env.BPS_EC2_INSTANCE_ID||'',
+      securityGroupId:process.env.BPS_EC2_SECURITY_GROUP_ID||'',
+      region:process.env.BPS_AWS_REGION||''
+    });
+  }
+
   if(req.url?.startsWith('/api/results/')&&req.method==='GET'){
     const fileName=decodeURIComponent(req.url.slice('/api/results/'.length).split('?')[0]);
     if(!fileName||path.basename(fileName)!==fileName||!fileName.endsWith('.csv'))return json(res,{error:'Invalid result file'},400);
@@ -460,16 +446,7 @@ const server=http.createServer(async(req,res)=>{
     res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Access-Control-Allow-Origin':'*','Cache-Control':'no-store'});
     return fs.createReadStream(filePath).pipe(res);
   }
-  if(req.url==='/api/config'&&req.method==='GET') return json(res,uiConfig());
   if(req.url==='/api/status'&&req.method==='GET') return json(res,state);
-  if(req.url==='/api/setup'&&req.method==='POST'){
-    if(state.running) return json(res,{error:'A scan/setup operation is already running.'},409);
-    let cfg;try{cfg=await body(req)}catch{return json(res,{error:'Invalid JSON'},400)}
-    state={running:true,status:'starting',message:'Preparing EC2',lines:[],startedAt:new Date().toISOString(),finishedAt:null,resultFile:null,error:null};
-    json(res,{ok:true});
-    prepareEc2(cfg).then(()=>{state.running=false;state.status='complete';state.message='EC2 ready';state.finishedAt=new Date().toISOString()}).catch(e=>{state.running=false;state.status='error';state.message='EC2 preparation failed';state.error=e.message;log('✗ '+e.message);state.finishedAt=new Date().toISOString()});
-    return;
-  }
   if(req.url==='/api/run'&&req.method==='POST'){
     if(state.running) return json(res,{error:'A scan is already running.'},409);
     let cfg;try{cfg=await body(req)}catch{return json(res,{error:'Invalid JSON'},400)}
