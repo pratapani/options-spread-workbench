@@ -1,0 +1,65 @@
+# =========================
+# Secrets / credentials
+# =========================
+.env
+.env.*
+!.env.example
+
+*.pem
+*.key
+*.ppk
+keys/
+**/keys/
+
+# =========================
+# Node
+# =========================
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# =========================
+# Generated CSV / scan output
+# =========================
+*.csv
+!data/samples/stock_lot.csv
+
+# =========================
+# Archives / backups / old versions
+# =========================
+services/scanner/archive/
+**/*archive*
+**/*backup*
+**/*bkup*
+*_old.*
+*_OLD.*
+*_old_*.*
+*_backup.*
+*_bkup.*
+
+# Historical UI snapshots
+apps/web/src/main_Aug*.jsx
+apps/web/src/main_Sep*.jsx
+apps/web/src/main_bkup.jsx
+apps/web/src/styles_Aug*.css
+apps/web/src/styles_bkup.css
+
+# =========================
+# Logs
+# =========================
+*.log
+
+# Downloaded security master data
+services/scanner/security_master/
