@@ -50,7 +50,7 @@ const expiryFromRows=rows=>{const values=[...new Set(rows.map(r=>String(r.EXPIRY
 
 function App(){
 const loadedResult=useRef("");
-const[rows,setRows]=useState([]),[fileName,setFileName]=useState(""),[strategy,setStrategy]=useState("BULL_PUT"),[minOtm,setMinOtm]=useState(3),[maxOtm,setMaxOtm]=useState(8),[maxWidth,setMaxWidth]=useState(200),[minPL,setMinPL]=useState(3),[maxPL,setMaxPL]=useState(5),[expiry,setExpiry]=useState(""),[topN,setTopN]=useState(10),[sortBy,setSortBy]=useState("SCORE"),[view,setView]=useState("all"),[search,setSearch]=useState(""),[selected,setSelected]=useState(null),[page,setPage]=useState(1),[pageSize,setPageSize]=useState(25),[loadingDemo,setLoadingDemo]=useState(false),[gradeFilter,setGradeFilter]=useState(["A+","A","B","C","D"]),[gradeOpen,setGradeOpen]=useState(false),[applied,setApplied]=useState({minOtm:3,maxOtm:8,maxWidth:200,minPL:3,maxPL:5,grades:["A+","A","B","C","D"],search:""}),[scenario,setScenario]=useState(null),[controller,setController]=useState({running:false,status:"idle",message:"Ready",lines:[],error:null}),[runCfg,setRunCfg]=useState({host:"",user:"ec2-user",keyPath:"",remoteDir:"/home/ec2-user/option-scanner",sessionToken:"",minOI:100000,minVolume:100000}),[runPanel,setRunPanel]=useState(true),[lastRunConfig,setLastRunConfig]=useState(null),[logTimes,setLogTimes]=useState([]),[completeFilters,setCompleteFilters]=useState({});
+const[rows,setRows]=useState([]),[fileName,setFileName]=useState(""),[strategy,setStrategy]=useState("BULL_PUT"),[minOtm,setMinOtm]=useState(3),[maxOtm,setMaxOtm]=useState(8),[maxWidth,setMaxWidth]=useState(200),[minPL,setMinPL]=useState(3),[maxPL,setMaxPL]=useState(5),[expiry,setExpiry]=useState(""),[topN,setTopN]=useState(10),[sortBy,setSortBy]=useState("SCORE"),[view,setView]=useState("all"),[search,setSearch]=useState(""),[selected,setSelected]=useState(null),[page,setPage]=useState(1),[pageSize,setPageSize]=useState(25),[loadingDemo,setLoadingDemo]=useState(false),[gradeFilter,setGradeFilter]=useState(["A+","A","B","C","D"]),[gradeOpen,setGradeOpen]=useState(false),[applied,setApplied]=useState({minOtm:3,maxOtm:8,maxWidth:200,minPL:3,maxPL:5,grades:["A+","A","B","C","D"],search:""}),[scenario,setScenario]=useState(null),[controller,setController]=useState({running:false,status:"idle",message:"Ready",lines:[],error:null}),[runCfg,setRunCfg]=useState({host:"",user:"ec2-user",keyPath:"",remoteDir:"/home/ec2-user/option-scanner",csvPublicDir:"",sessionToken:"",minOI:100000,minVolume:100000}),[runPanel,setRunPanel]=useState(true),[lastRunConfig,setLastRunConfig]=useState(null),[logTimes,setLogTimes]=useState([]),[completeFilters,setCompleteFilters]=useState({}),[csvInputKey,setCsvInputKey]=useState(0);
 
 const isCall=strategy==="BEAR_CALL";
 const strategyLabel=isCall?"Bear Call Spread":"Bull Put Spread";
@@ -58,7 +58,7 @@ const optionSide=isCall?"CALL":"PUT";
 const resultLatest=isCall?"latest_bcs_results.csv":"latest_bps_results.csv";
 
 React.useEffect(()=>{
-  fetch("http://127.0.0.1:8787/api/config").then(r=>r.json()).then(c=>setRunCfg(x=>({...x,host:c.host||x.host,user:c.user||x.user,keyPath:c.keyPath||x.keyPath,remoteDir:c.remoteDir||x.remoteDir}))).catch(()=>{});
+  fetch("http://127.0.0.1:8787/api/config").then(r=>r.json()).then(c=>setRunCfg(x=>({...x,host:c.host||x.host,user:c.user||x.user,keyPath:c.keyPath||x.keyPath,remoteDir:c.remoteDir||x.remoteDir,csvPublicDir:c.csvPublicDir||x.csvPublicDir}))).catch(()=>{});
   fetch("http://127.0.0.1:8787/api/status").then(r=>r.json()).then(setController).catch(()=>{});
 },[]);
 
@@ -98,7 +98,18 @@ const load=(data,name,scanConfig=null)=>{
   setView("all");
   setPage(1);
 };
-const handleFile=e=>{const f=e.target.files?.[0];if(f)Papa.parse(f,{header:true,skipEmptyLines:true,complete:r=>load(r.data,f.name)})};
+const handleCsvFile=e=>{
+  const f=e.target.files?.[0];
+  if(!f)return;
+  Papa.parse(f,{
+    header:true,
+    skipEmptyLines:true,
+    complete:r=>load(r.data,f.name),
+    error:err=>syncController({...controller,status:"error",message:err.message||"Unable to parse CSV",error:err.message||"Unable to parse CSV"})
+  });
+  e.target.value="";
+};
+
 const loadDemo=async()=>{setLoadingDemo(true);try{const text=await fetch(strategy==="BEAR_CALL"?"/sample_bcs_results.csv":"/sample_bps_results.csv").then(r=>r.text());Papa.parse(text,{header:true,skipEmptyLines:true,complete:r=>{load(r.data,`Demo · ${strategyLabel}`);setLoadingDemo(false)}})}catch(e){setLoadingDemo(false)}};
 
 const strategyRows=useMemo(()=>rows.filter(r=>r.STRATEGY===strategy||!r.STRATEGY),[rows,strategy]);
@@ -218,7 +229,7 @@ const loadLatestResults=(scanConfig=null)=>{
 };
 const loadLatest=()=>loadLatestResults(lastRunConfig);
 const pollController=()=>{fetch("http://127.0.0.1:8787/api/status").then(r=>r.json()).then(x=>{syncController(x);if(x.status==="complete"&&x.resultFile&&loadedResult.current!==x.resultFile){loadedResult.current=x.resultFile;loadLatestResults(lastRunConfig)}}).catch(()=>syncController({...controller,status:"offline",message:"Local controller not running"}));};
-React.useEffect(()=>{fetch("http://127.0.0.1:8787/api/config").then(r=>r.json()).then(c=>setRunCfg(x=>({...x,host:c.host||x.host,user:c.user||x.user,keyPath:c.keyPath||x.keyPath,remoteDir:c.remoteDir||x.remoteDir}))).catch(()=>{});pollController();const id=setInterval(pollController,1200);return()=>clearInterval(id)},[strategy]);
+React.useEffect(()=>{fetch("http://127.0.0.1:8787/api/config").then(r=>r.json()).then(c=>setRunCfg(x=>({...x,host:c.host||x.host,user:c.user||x.user,keyPath:c.keyPath||x.keyPath,remoteDir:c.remoteDir||x.remoteDir,csvPublicDir:c.csvPublicDir||x.csvPublicDir}))).catch(()=>{});pollController();const id=setInterval(pollController,1200);return()=>clearInterval(id)},[strategy]);
 
 const runScan=async()=>{
   try{
@@ -271,9 +282,10 @@ const switchStrategy=next=>{
 };
 
 return <div className="app">
+ 
 <header className="topbar">
 <div className="brand"><div className="eyebrow">OPTIONS CREDIT SPREAD · TRADING ANALYTICS</div><h1>Options Spread Workbench</h1><p>Scan Bull Put and Bear Call credit spreads using the same screening and risk framework.</p></div>
-<div className="actions"><button onClick={loadLatest}>↻ Latest scan</button><label className="upload"><input type="file" accept=".csv" onChange={handleFile}/><span>＋ Choose CSV</span></label><button onClick={loadDemo}>{loadingDemo?"Loading…":"Demo · 176"}</button>{rows.length>0&&<button onClick={()=>{setRows([]);setFileName("");setSelected(null)}}>Clear</button>}</div>
+<div className="actions"><button onClick={loadLatest}>↻ Latest scan</button><label className="upload"><input key={csvInputKey} type="file" accept=".csv,text/csv" onChange={handleCsvFile}/><span>＋ Choose CSV</span></label><button onClick={loadDemo}>{loadingDemo?"Loading…":"Demo · 176"}</button>{rows.length>0&&<button onClick={()=>{setRows([]);setFileName("");setSelected(null)}}>Clear</button>}</div>
 </header>
 <div className="strategyTabs"><button className={!isCall?"active":""} onClick={()=>switchStrategy("BULL_PUT")}>Bull Put Spread</button><button className={isCall?"active":""} onClick={()=>switchStrategy("BEAR_CALL")}>Bear Call Spread</button></div>
 
@@ -282,9 +294,8 @@ return <div className="app">
 {runPanel&&<><div className="runGrid"><label>EC2 Public IP<input value={runCfg.host} onChange={e=>setRun("host",e.target.value)}/></label><label>SSH User<input value={runCfg.user} onChange={e=>setRun("user",e.target.value)}/></label><label>SSH Key<input value={runCfg.keyPath} onChange={e=>setRun("keyPath",e.target.value)}/></label><label>Remote folder<input value={runCfg.remoteDir} onChange={e=>setRun("remoteDir",e.target.value)}/></label><label>Expiry date<input type="date" min={localDateISO()} max={addMonthsISO(3)} value={/^\d{4}-\d{2}-\d{2}$/.test(String(expiry||""))?expiry:""} onChange={e=>setExpiry(e.target.value)}/><small>Used exactly by the EC2 scanner; no automatic fallback.</small></label><label>Session token<input type="password" placeholder="Paste fresh Breeze session token" value={runCfg.sessionToken} onChange={e=>setRun("sessionToken",e.target.value)}/><small>Only sent to EC2 for this scan; API credentials come from the Windows .env.</small></label><label>OTM min<input type="number" step=".1" value={minOtm} onChange={e=>setMinOtm(num(e.target.value))}/>%</label><label>OTM max<input type="number" step=".1" value={maxOtm} onChange={e=>setMaxOtm(num(e.target.value))}/>%</label><label>Max spread width<input type="number" value={maxWidth} onChange={e=>setMaxWidth(num(e.target.value))}/>₹</label><label>Min P:L<input type="number" step=".1" value={minPL} onChange={e=>setMinPL(num(e.target.value))}/></label><label>Max P:L<input type="number" step=".1" value={maxPL} onChange={e=>setMaxPL(num(e.target.value))}/></label><label>Min OI<input type="number" value={runCfg.minOI} onChange={e=>setRun("minOI",num(e.target.value))}/></label><label>Min volume<input type="number" value={runCfg.minVolume} onChange={e=>setRun("minVolume",num(e.target.value))}/></label><div className="runRules"><b>Scan configuration</b><span>Expiry {formatExpiryDisplay(expiry)} · OTM {minOtm}–{maxOtm}% · Width ≤ ₹{maxWidth} · P:L 1:{minPL}–1:{maxPL} · OI ≥ {integer(runCfg.minOI)} · Volume ≥ {integer(runCfg.minVolume)}</span></div></div><div className="runActions"><button className="runBtn" disabled={controller.running} onClick={runScan}>{controller.running?"⏳ Running…":`🚀 Run ${strategyLabel}`}</button><button className="testBtn" onClick={pollController}>↻ Refresh status</button><span className={"controllerStatus "+(controller.status==="complete"?"ok":controller.status==="error"?"bad":"")}>● {controller.message}</span></div><div className="runLog"><div className="runLogHead"><strong>SCAN LOG</strong><span>{controller.status}</span></div><div className="runLogScroll">{controller.lines?.map((x,i)=><div className="runLogLine" key={i}><span className="runLogTime">{logTimes[i]||"—"}</span><span>{x}</span></div>)}{!controller.lines?.length&&<div className="runLogEmpty">No scanner log received yet.</div>}</div></div></>}
 </section>
 
-{!rows.length?<section className="empty"><div className="dropIcon">CSV</div><h2>Load your scanner results</h2><p>Use the current scanner result CSV. All analysis runs locally in your browser.</p><label className="upload primary"><input type="file" accept=".csv" onChange={handleFile}/><span>Choose CSV</span></label><button className="text" onClick={loadDemo}>Load demo dataset</button></section>:
+{!rows.length?<section className="empty"><div className="dropIcon">CSV</div><h2>Load your scanner results</h2><p>Use the current scanner result CSV. All analysis runs locally in your browser.</p><label className="upload primary"><input key={csvInputKey} type="file" accept=".csv,text/csv" onChange={handleCsvFile}/><span>Choose CSV</span></label><button className="text" onClick={loadDemo}>Load demo dataset</button></section>:
 <>
-<div className="expiryBanner" style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",margin:"10px 0",border:"1px solid #dbe4ef",borderRadius:10,background:"#f8fbfd"}}><span className="expiryLabel" style={{fontSize:10,fontWeight:800,color:"#63748a",letterSpacing:".08em"}}>EXPIRY</span><strong style={{fontSize:16,color:"#17243a"}}>{formatExpiryDisplay(expiryFromRows(rows)||expiry)}</strong><span className="expiryNote" style={{fontSize:11,color:"#7f93ad"}}>All displayed strategies are for this selected expiry.</span></div>
 <div className="fileBar"><span>● <b>{fileName}</b> · <b>{stats.all}</b> strategies loaded</span><span><b>{stats.q}</b> qualified · <b>{stats.all-stats.q}</b> outside · <b>{applied.grades.length}/5</b> grades active · OTM {applied.minOtm}–{applied.maxOtm}% · P:L {applied.minPL}–{applied.maxPL}</span></div>
 
 <section className="filters">
@@ -307,7 +318,7 @@ return <div className="app">
 </section>
 
 <section className="hero">
-<div><span className="pill">⚡ LIVE SCREENING LOGIC</span><h2>Opportunity ranking</h2><p>Score = OTM 35% + P:L 30% + width 20% + credit/spot 15%. Grades are relative to the currently selected scan criteria. Use this as a shortlist, not as a trade signal.</p></div>
+<div><span className="pill">⚡ LIVE SCREENING LOGIC</span><div style={{display:"flex",alignItems:"center",gap:16}}><h2 style={{margin:0}}>Opportunity ranking</h2><span style={{fontSize:11,fontWeight:800,color:"#b7c5d9",letterSpacing:".08em"}}>EXPIRY</span><strong style={{fontSize:16,color:"#ffffff"}}>{formatExpiryDisplay(expiry)}</strong></div><p>Score = OTM 35% + P:L 30% + width 20% + credit/spot 15%. Grades are relative to the currently selected scan criteria. Use this as a shortlist, not as a trade signal.</p></div>
 <div className="heroStats"><div><b>{best.length}</b><span>best picks</span></div><div><b>{stats.all}</b><span>strategies</span></div><div><b>{stats.q?Math.round(stats.q/stats.all*100):0}%</b><span>pass rate</span></div></div>
 </section>
 
@@ -339,10 +350,7 @@ return <div className="app">
 </section>
 </>}
 
-{selected&&scenario&&<div className="overlay" onClick={()=>setSelected(null)}><aside className="drawer" onClick={e=>e.stopPropagation()}>
-<div className="drawerTop"><div><span className="pill dark">LIVE {strategyLabel.toUpperCase()}</span><h2>{selected.STOCK}</h2><p>Scanner rank #{selected.RK} · dashboard score {selected.SCORE}{selected.EXPIRY&&" · "+selected.EXPIRY}</p></div><button className="close" onClick={()=>setSelected(null)}>×</button></div>
-<div className="gradeBig"><Grade g={selected.GRADE}/><strong>{selected.SCORE}</strong><span>Opportunity score</span></div>
-<div className="scenarioSection"><div className="sectionTitle">WHAT-IF WORKBENCH <span>all execution inputs editable · derived values recalculate instantly</span></div><div className="scenarioInputs fullScenario"><label>Qty / Lots<input type="number" min="1" step="1" value={scenario.lots} onChange={e=>updateScenario("lots",e.target.value)}/><small>Total quantity: {integer(calc.quantity)}</small></label><label>Lot size<input type="number" min="1" step="1" value={scenario.lotSize} onChange={e=>updateScenario("lotSize",e.target.value)}/><small>Scanner: {integer(selected.LOT)}</small></label><label>Spot<input type="number" step=".05" value={scenario.spot} onChange={e=>updateScenario("spot",e.target.value)}/><small>Scanner: {money(selected.SPOT)}</small></label><label>Sell strike<input type="number" value={scenario.sellStrike} onChange={e=>updateScenario("sellStrike",e.target.value)}/><small>Scanner: {integer(selected.SELL)}</small></label><label>Buy strike<input type="number" value={scenario.buyStrike} onChange={e=>updateScenario("buyStrike",e.target.value)}/><small>Scanner: {integer(selected.BUY)}</small></label><label>Sell {optionSide} BID<input type="number" step=".01" value={scenario.sellBid} onChange={e=>{updateScenario("sellBid",e.target.value);updateScenario("sellPrice",e.target.value)}}/><small>Scanner: {money(selected.SELL_BID)}</small></label><label>Sell {optionSide} OFFER<input type="number" step=".01" value={scenario.sellOffer} onChange={e=>updateScenario("sellOffer",e.target.value)}/><small>Scanner: {money(selected.SELL_OFFER)}</small></label><label>Buy {optionSide} BID<input type="number" step=".01" value={scenario.buyBid} onChange={e=>updateScenario("buyBid",e.target.value)}/><small>Scanner: {money(selected.BUY_BID)}</small></label><label>Buy {optionSide} OFFER<input type="number" step=".01" value={scenario.buyOffer} onChange={e=>{updateScenario("buyOffer",e.target.value);updateScenario("buyPrice",e.target.value)}}/><small>Scanner: {money(selected.BUY_OFFER)}</small></label><label>Actual sell fill<input type="number" step=".01" value={scenario.sellPrice} onChange={e=>updateScenario("sellPrice",e.target.value)}/><small>Used for P/L calculation</small></label><label>Actual buy fill<input type="number" step=".01" value={scenario.buyPrice} onChange={e=>updateScenario("buyPrice",e.target.value)}/><small>Used for P/L calculation</small></label></div><button className="scenarioReset" onClick={()=>openStrategy(selected)}>↺ Reset to scanner values</button></div><div className="legs"><D k={"SELL "+optionSide} v={integer(calc.sellStrike)}/><D k={"BUY "+optionSide} v={integer(calc.buyStrike)}/><D k="WIDTH" v={money(calc.width)}/></div><div className="riskbar"><div><span>MAX PROFIT</span><b>{money(calc.maxProfit)}</b></div><div><span>MAX LOSS</span><b>{money(calc.maxLoss)}</b></div></div><div className="detailGrid"><D k="NET CREDIT" v={money(calc.credit)}/><D k="BREAKEVEN" v={money(calc.breakeven)}/><D k="OTM" v={calc.otm.toFixed(2)+"%"}/><D k="OTM PTS" v={calc.otmPts.toFixed(2)}/><D k="P:L" v={calc.pl>=0?"1:"+calc.pl.toFixed(2):"Invalid"}/><D k="TOTAL QTY" v={integer(calc.quantity)}/></div><div className="executionNote"><b>SCANNER VS WHAT-IF</b><span>Original CSV remains unchanged. This panel is temporary scenario analysis.</span><em>Default calculation uses SELL at bid and BUY at offer; actual fills can be overridden independently.</em></div><div className="why"><b>Live strategy analysis</b><p>Edit spot, strikes, bid/offer prices, actual fills, lot size or number of lots. Width, credit, OTM, breakeven, max profit, max loss and P:L recalculate automatically.</p></div></aside></div>}
+
 <footer>Options Spread Workbench · Bull Put + Bear Call · local-only analytics</footer>
 </div>
 }
