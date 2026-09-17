@@ -145,6 +145,120 @@ function awsCliPath() {
   return 'aws';
 }
 
+
+function awsBaseArgs() {
+  const args = [];
+  const region = process.env.BPS_AWS_REGION;
+  if (region?.trim()) args.push('--region', region.trim());
+  return args;
+}
+
+async function ensureSshAccess(cfg) {
+  const aws = awsCliPath();
+  const securityGroupId = String(
+    cfg.securityGroupId || process.env.BPS_EC2_SECURITY_GROUP_ID || ''
+  ).trim();
+
+  if (!securityGroupId) {
+    throw new Error(
+      'BPS_EC2_SECURITY_GROUP_ID is required to refresh SSH access from the UI.'
+    );
+  }
+
+  state.status = 'ssh-access';
+  state.message = 'Refreshing SSH access';
+  log(`Using EC2 security group: ${securityGroupId}`);
+  log('Checking current Windows public IP for SSH access...');
+
+  let publicIp = '';
+  try {
+    const response = await fetch('https://api.ipify.org');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    publicIp = (await response.text()).trim();
+  } catch (error) {
+    throw new Error(
+      `Unable to determine current Windows public IP. ${error.message}`
+    );
+  }
+
+  if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(publicIp)) {
+    throw new Error(`Invalid public IP returned by api.ipify.org: ${publicIp}`);
+  }
+
+  const cidr = `${publicIp}/32`;
+  log(`Current Windows public IP: ${publicIp}`);
+
+  let sgResult;
+  try {
+    sgResult = await run(aws, [
+      ...awsBaseArgs(),
+      'ec2', 'describe-security-groups',
+      '--group-ids', securityGroupId,
+      '--query',
+      'SecurityGroups[0].IpPermissions[?FromPort==`22` && ToPort==`22` && IpProtocol==`tcp`].IpRanges[].CidrIp',
+      '--output', 'text'
+    ]);
+  } catch (error) {
+    throw new Error(
+      `Unable to inspect SSH security-group rules. ${error.message}`
+    );
+  }
+
+  const ranges = String(sgResult.out || '')
+    .split(/\s+/)
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  if (ranges.includes(cidr)) {
+    log(`✓ SSH access already allowed for ${cidr}`);
+    return;
+  }
+
+  log(`SSH access missing for ${cidr} — adding rule to ${securityGroupId}...`);
+
+  try {
+    // Use the simple AWS CLI form because it is reliable with Windows
+    // native argument parsing.
+    await run(aws, [
+      ...awsBaseArgs(),
+      'ec2', 'authorize-security-group-ingress',
+      '--group-id', securityGroupId,
+      '--protocol', 'tcp',
+      '--port', '22',
+      '--cidr', cidr
+    ]);
+  } catch (error) {
+    // If another process added the rule between describe and authorize,
+    // verify before treating it as a real failure.
+    try {
+      const verify = await run(aws, [
+        ...awsBaseArgs(),
+        'ec2', 'describe-security-groups',
+        '--group-ids', securityGroupId,
+        '--query',
+        'SecurityGroups[0].IpPermissions[?FromPort==`22` && ToPort==`22` && IpProtocol==`tcp`].IpRanges[].CidrIp',
+        '--output', 'text'
+      ]);
+
+      const verifiedRanges = String(verify.out || '')
+        .split(/\s+/)
+        .map(x => x.trim())
+        .filter(Boolean);
+
+      if (verifiedRanges.includes(cidr)) {
+        log(`✓ SSH access already added for ${cidr}`);
+        return;
+      }
+    } catch {}
+
+    throw new Error(
+      `Unable to add SSH access for ${cidr}. ${error.message}`
+    );
+  }
+
+  log(`✓ SSH access added for ${cidr}`);
+}
+
 async function ensureEc2Ready(cfg) {
   const instanceId = process.env.BPS_EC2_INSTANCE_ID || cfg.instanceId || 'i-05a5ee6857acfb59f';
 
@@ -365,6 +479,9 @@ async function doScan(cfg) {
    */
 
   const host = await ensureEc2Ready(cfg);
+
+  // Refresh TCP/22 access for the current Windows public IP before SSH.
+  await ensureSshAccess(cfg);
 
   await waitForSsh(host, user, key);
 

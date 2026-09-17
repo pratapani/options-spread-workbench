@@ -50,7 +50,7 @@ const expiryFromRows=rows=>{const values=[...new Set(rows.map(r=>String(r.EXPIRY
 
 function App(){
 const loadedResult=useRef("");
-const[rows,setRows]=useState([]),[fileName,setFileName]=useState(""),[strategy,setStrategy]=useState("BULL_PUT"),[minOtm,setMinOtm]=useState(3),[maxOtm,setMaxOtm]=useState(8),[maxWidth,setMaxWidth]=useState(200),[minPL,setMinPL]=useState(3),[maxPL,setMaxPL]=useState(5),[expiry,setExpiry]=useState(""),[topN,setTopN]=useState(10),[sortBy,setSortBy]=useState("SCORE"),[view,setView]=useState("all"),[search,setSearch]=useState(""),[selected,setSelected]=useState(null),[page,setPage]=useState(1),[pageSize,setPageSize]=useState(25),[loadingDemo,setLoadingDemo]=useState(false),[gradeFilter,setGradeFilter]=useState(["A+","A","B","C","D"]),[gradeOpen,setGradeOpen]=useState(false),[applied,setApplied]=useState({minOtm:3,maxOtm:8,maxWidth:200,minPL:3,maxPL:5,grades:["A+","A","B","C","D"],search:""}),[scenario,setScenario]=useState(null),[controller,setController]=useState({running:false,status:"idle",message:"Ready",lines:[],error:null}),[runCfg,setRunCfg]=useState({host:"",user:"ec2-user",keyPath:"",remoteDir:"/home/ec2-user/option-scanner",csvPublicDir:"",sessionToken:"",minOI:100000,minVolume:100000}),[runPanel,setRunPanel]=useState(true),[lastRunConfig,setLastRunConfig]=useState(null),[logTimes,setLogTimes]=useState([]),[completeFilters,setCompleteFilters]=useState({}),[csvInputKey,setCsvInputKey]=useState(0);
+const[rows,setRows]=useState([]),[fileName,setFileName]=useState(""),[strategy,setStrategy]=useState("BULL_PUT"),[minOtm,setMinOtm]=useState(3),[maxOtm,setMaxOtm]=useState(8),[maxWidth,setMaxWidth]=useState(200),[minPL,setMinPL]=useState(3),[maxPL,setMaxPL]=useState(5),[expiry,setExpiry]=useState(""),[topN,setTopN]=useState(10),[sortBy,setSortBy]=useState("SCORE"),[view,setView]=useState("all"),[search,setSearch]=useState(""),[selected,setSelected]=useState(null),[plSelection,setPlSelection]=useState(null),[page,setPage]=useState(1),[pageSize,setPageSize]=useState(25),[loadingDemo,setLoadingDemo]=useState(false),[gradeFilter,setGradeFilter]=useState(["A+","A","B","C","D"]),[gradeOpen,setGradeOpen]=useState(false),[applied,setApplied]=useState({minOtm:3,maxOtm:8,maxWidth:200,minPL:3,maxPL:5,grades:["A+","A","B","C","D"],search:""}),[scenario,setScenario]=useState(null),[controller,setController]=useState({running:false,status:"idle",message:"Ready",lines:[],error:null}),[runCfg,setRunCfg]=useState({host:"",user:"ec2-user",keyPath:"",remoteDir:"/home/ec2-user/option-scanner",csvPublicDir:"",sessionToken:"",minOI:100000,minVolume:100000}),[runPanel,setRunPanel]=useState(true),[lastRunConfig,setLastRunConfig]=useState(null),[logTimes,setLogTimes]=useState([]),[completeFilters,setCompleteFilters]=useState({}),[csvInputKey,setCsvInputKey]=useState(0);
 
 const isCall=strategy==="BEAR_CALL";
 const strategyLabel=isCall?"Bear Call Spread":"Bull Put Spread";
@@ -193,6 +193,25 @@ const plData=useMemo(()=>{
     return {name:`${fmt(a)}–${fmt(b)}`,count};
   });
 },[qualified,applied.minPL,applied.maxPL]);
+
+// P:L pie drill-down. Keep the exact same boundaries used to build the pie.
+const selectedPLRows=useMemo(()=>{
+  if(!plSelection)return [];
+  const lo=num(applied.minPL),hi=num(applied.maxPL);
+  const span=Math.max(0.0001,hi-lo),step=span/4;
+  const a=lo+plSelection.index*step;
+  const b=plSelection.index===3?hi:lo+(plSelection.index+1)*step;
+  return qualified.filter(r=>{
+    const p=num(r["P:L"]);
+    return plSelection.index===3?p>=a&&p<=b:p>=a&&p<b;
+  });
+},[plSelection,qualified,applied.minPL,applied.maxPL]);
+
+const handlePLSliceClick=i=>{
+  if(!Number.isInteger(i)||!plData[i]||plData[i].count===0)return;
+  setPlSelection({index:i,name:plData[i].name});
+};
+
 // Lower P:L means less loss relative to profit, so the lower band is stronger.
 const plColors=["#22c55e","#14b8a6","#f59e0b","#ef4444"];
 
@@ -278,14 +297,14 @@ const runScan=async()=>{
 
 const switchStrategy=next=>{
   if(controller.running)return;
-  setStrategy(next);setRows([]);setFileName("");setSelected(null);setScenario(null);setExpiry("");setCompleteFilters({});setSearch("");setView("all");setPage(1);setApplied({...DEFAULT_FILTERS,grades:[...DEFAULT_FILTERS.grades]});setMinOtm(3);setMaxOtm(8);setMaxWidth(200);setMinPL(3);setMaxPL(5);setGradeFilter([...DEFAULT_FILTERS.grades]);setGradeOpen(false);setLogTimes([]);
+  setStrategy(next);setRows([]);setFileName("");setSelected(null);setScenario(null);setPlSelection(null);setExpiry("");setCompleteFilters({});setSearch("");setView("all");setPage(1);setApplied({...DEFAULT_FILTERS,grades:[...DEFAULT_FILTERS.grades]});setMinOtm(3);setMaxOtm(8);setMaxWidth(200);setMinPL(3);setMaxPL(5);setGradeFilter([...DEFAULT_FILTERS.grades]);setGradeOpen(false);setLogTimes([]);
 };
 
 return <div className="app">
  
 <header className="topbar">
 <div className="brand"><div className="eyebrow">OPTIONS CREDIT SPREAD · TRADING ANALYTICS</div><h1>Options Spread Workbench</h1><p>Scan Bull Put and Bear Call credit spreads using the same screening and risk framework.</p></div>
-<div className="actions"><button onClick={loadLatest}>↻ Latest scan</button><label className="upload"><input key={csvInputKey} type="file" accept=".csv,text/csv" onChange={handleCsvFile}/><span>＋ Choose CSV</span></label><button onClick={loadDemo}>{loadingDemo?"Loading…":"Demo · 176"}</button>{rows.length>0&&<button onClick={()=>{setRows([]);setFileName("");setSelected(null)}}>Clear</button>}</div>
+<div className="actions"><button onClick={loadLatest}>↻ Latest scan</button><label className="upload"><input key={csvInputKey} type="file" accept=".csv,text/csv" onChange={handleCsvFile}/><span>＋ Choose CSV</span></label><button onClick={loadDemo}>{loadingDemo?"Loading…":"Demo · 176"}</button>{rows.length>0&&<button onClick={()=>{setRows([]);setFileName("");setSelected(null);setScenario(null);setPlSelection(null)}}>Clear</button>}</div>
 </header>
 <div className="strategyTabs"><button className={!isCall?"active":""} onClick={()=>switchStrategy("BULL_PUT")}>Bull Put Spread</button><button className={isCall?"active":""} onClick={()=>switchStrategy("BEAR_CALL")}>Bear Call Spread</button></div>
 
@@ -341,15 +360,89 @@ return <div className="app">
 {view==="all"&&<div className="pagination"><span>Showing <b>{displayed.length?((safePage-1)*pageSize+1):0}–{Math.min(safePage*pageSize,displayed.length)}</b> of <b>{displayed.length}</b></span><div><button disabled={safePage<=1} onClick={()=>setPage(safePage-1)}>← Prev</button><select value={pageSize} onChange={e=>{setPageSize(num(e.target.value));setPage(1)}}><option value="25">25 / page</option><option value="50">50 / page</option><option value="100">100 / page</option><option value="999999">All</option></select><button disabled={safePage>=totalPages} onClick={()=>setPage(safePage+1)}>Next →</button></div></div>}
 </section>
 
+{plSelection&&<section className="panel" style={{marginTop:16}}>
+  <div className="tabs">
+    <span><b>P:L RANGE</b> · {plSelection.name}</span>
+    <span className="hint">{selectedPLRows.length} matching {selectedPLRows.length===1?"strategy":"strategies"} · click a row to open the What-If Workbench</span>
+    <button className="reset" onClick={()=>setPlSelection(null)}>Clear</button>
+  </div>
+  <div className="table">
+    {selectedPLRows.length?<table><thead><tr><th>RK</th><th>STOCK</th><th>GRADE</th><th>SPOT</th><th>SELL</th><th>BUY</th><th>OTM</th><th>WIDTH</th><th>CREDIT</th><th>PROFIT/LOT</th><th>LOSS/LOT</th><th>P:L</th></tr></thead>
+    <tbody>{selectedPLRows.map((r,i)=><tr className={"clickable scoreRow "+gradeClass(r.GRADE)} onClick={()=>openStrategy(r)} key={r.STOCK+"-"+r.SELL+"-"+r.BUY+"-pl-"+i}>
+      <td>{r.RK}</td><td className="stock">{r.STOCK}</td><td><Grade g={r.GRADE}/></td><td>{money(r.SPOT)}</td><td>{integer(r.SELL)}</td><td>{integer(r.BUY)}</td><td>{r["OTM%"].toFixed(2)}%</td><td>{integer(r.WIDTH)}</td><td>{money(r.CREDIT)}</td><td className="profit">{money(r["PROFIT/LOT"])}</td><td className="loss">{money(r["LOSS/LOT"])}</td><td><b>1:{r["P:L"].toFixed(2)}</b></td>
+    </tr>)}</tbody></table>:<div className="completeTableToolbar"><b>No matching strategies in this P:L range.</b></div>}
+  </div>
+</section>}
+
 <section className="charts">
 <Chart title="Profit Stats (1 stock / 1 lot)" sub="Best qualified qualified setups · profit shown per single lot"><ResponsiveContainer><BarChart data={best} margin={{top:10,right:15,left:10,bottom:5}}><CartesianGrid strokeDasharray="3 3" stroke="#dbe4ef"/><XAxis dataKey="STOCK" interval={0} tick={{fontSize:9}} angle={-25} textAnchor="end" height={55}/><YAxis tickFormatter={integer}/><Tooltip contentStyle={{borderRadius:10,border:"1px solid #dbe4ef"}} formatter={(v)=>money(v)} labelFormatter={(label)=>{const r=best.find(x=>x.STOCK===label);return r?`${r.STOCK} · ${strategyLabel} ${integer(r.SELL)} / ${integer(r.BUY)}`:label}} content={({active,payload,label})=>{if(!active||!payload?.length)return null;const r=best.find(x=>x.STOCK===label);if(!r)return null;return <div style={{background:"#fff",border:"1px solid #dbe4ef",borderRadius:10,padding:"10px 12px",boxShadow:"0 8px 20px #17243a18"}}><div style={{fontWeight:900,color:"#17243a",marginBottom:4}}>{r.STOCK}</div><div style={{fontSize:12}}>Profit / lot: <b>{money(r["PROFIT/LOT"])}</b></div><div style={{fontSize:11,color:"#61758e",marginTop:3}}>{strategyLabel}: SELL {integer(r.SELL)} {optionSide} / BUY {integer(r.BUY)} {optionSide}</div><div style={{fontSize:11,color:"#61758e",marginTop:2}}>Credit {money(r.CREDIT)} · Width {integer(r.WIDTH)} · OTM {r["OTM%"].toFixed(2)}%</div></div>}}/><Bar dataKey="PROFIT/LOT" name="Profit / lot" radius={[7,7,2,2]}>{best.map((r,i)=><Cell key={i} fill={r.GRADE==="A+"?"#16a34a":r.GRADE==="A"?"#0f766e":r.GRADE==="B"?"#2563eb":r.GRADE==="C"?"#f59e0b":"#ef4444"}/>)}</Bar></BarChart></ResponsiveContainer></Chart>
-<Chart title="P:L distribution" sub="Green = stronger risk/reward · red = weaker risk/reward"><ResponsiveContainer><PieChart><Pie data={plData} dataKey="count" nameKey="name" cx="50%" cy="46%" outerRadius={108} innerRadius={62} paddingAngle={3} label>{plData.map((_,i)=><Cell key={i} fill={plColors[i]}/>)}</Pie><Tooltip/><Legend/></PieChart></ResponsiveContainer></Chart>
+<Chart title="P:L distribution" sub={plSelection?`Selected ${plSelection.name} · ${selectedPLRows.length} matching strategies · click another slice`:"Click a P:L range to show matching stocks · green = stronger risk/reward · red = weaker risk/reward"}><ResponsiveContainer><PieChart><Pie data={plData} dataKey="count" nameKey="name" cx="50%" cy="46%" outerRadius={108} innerRadius={62} paddingAngle={3} label>{plData.map((x,i)=><Cell key={i} fill={plColors[i]} cursor={x.count>0?"pointer":"default"} onClick={()=>handlePLSliceClick(i)}/>)}</Pie><Tooltip/><Legend/></PieChart></ResponsiveContainer></Chart>
 <Chart wide title="Best profit by stock" sub="Highest profit/lot among qualified stocks · each bar is the best {strategyLabel} found for that stock"><ResponsiveContainer><BarChart data={stockData} layout="vertical" margin={{top:5,right:30,left:8,bottom:5}}><CartesianGrid strokeDasharray="3 3" stroke="#dbe4ef"/><XAxis type="number" tickFormatter={integer}/><YAxis type="category" dataKey="STOCK" width={135} interval={0} tick={<StockTick/>} tickLine={false} axisLine={false}/><Tooltip cursor={{fill:"#eef7f6"}} content={({active,payload,label})=>{if(!active||!payload?.length)return null;const item=stockData.find(x=>x.STOCK===label);const r=item?.row;if(!r)return null;return <div style={{background:"#fff",border:"1px solid #dbe4ef",borderRadius:10,padding:"10px 12px",boxShadow:"0 8px 20px #17243a18",minWidth:210}}><div style={{fontWeight:900,color:"#17243a",marginBottom:5}}>{r.STOCK}</div><div style={{fontSize:12}}>Profit / lot: <b style={{color:"#087f5b"}}>{money(r["PROFIT/LOT"])}</b></div><div style={{fontSize:11,color:"#61758e",marginTop:4}}>{strategyLabel}: SELL {integer(r.SELL)} {optionSide} / BUY {integer(r.BUY)} {optionSide}</div><div style={{fontSize:11,color:"#61758e",marginTop:3}}>Credit {money(r.CREDIT)} · Width {integer(r.WIDTH)}</div><div style={{fontSize:11,color:"#61758e",marginTop:3}}>OTM {r["OTM%"].toFixed(2)}% · OTM pts {r["OTM PTS"].toFixed(2)}</div><div style={{fontSize:11,color:"#61758e",marginTop:3}}>P:L 1:{r["P:L"].toFixed(2)} · Grade {r.GRADE} · Score {r.SCORE}</div><div style={{fontSize:10,color:"#8a9aab",marginTop:6}}>Lot {integer(r.LOT)} · Expiry {r.EXPIRY||"—"}</div></div>}}/><Bar dataKey="best" name="Profit / lot" radius={[0,7,7,0]}>{stockData.map((x,i)=><Cell key={i} fill={x.row.GRADE==="A+"?"#16a34a":x.row.GRADE==="A"?"#0f766e":x.row.GRADE==="B"?"#2563eb":x.row.GRADE==="C"?"#f59e0b":"#ef4444"}/>)}</Bar></BarChart></ResponsiveContainer></Chart>
 <Chart title="Spread width" sub="Green → amber → red as width/risk increases"><ResponsiveContainer><BarChart data={widthData}><CartesianGrid strokeDasharray="3 3" stroke="#dbe4ef"/><XAxis dataKey="name"/><YAxis allowDecimals={false}/><Tooltip/><Bar dataKey="count" name="Strategies" radius={[7,7,2,2]}>{widthData.map((_,i)=><Cell key={i} fill={["#22c55e","#f59e0b","#3b82f6","#ef4444","#991b1b"][i]}/>)}</Bar></BarChart></ResponsiveContainer></Chart>
 <Chart title="OTM vs profit" sub="Each dot is a qualified strategy"><ResponsiveContainer><ScatterChart margin={{top:15,right:15,bottom:5,left:10}}><CartesianGrid stroke="#dbe4ef"/><XAxis type="number" dataKey="OTM%" name="OTM" unit="%"/><YAxis type="number" dataKey="PROFIT/LOT" name="Profit / lot" tickFormatter={integer}/><ZAxis range={[50,95]}/><Tooltip/><ReferenceLine x={applied.minOtm} stroke="#f59e0b" strokeDasharray="5 5"/><ReferenceLine x={applied.maxOtm} stroke="#ef4444" strokeDasharray="5 5"/>{["A+","A","B","C","D"].map(g=><Scatter key={g} name={g} data={qualified.filter(r=>r.GRADE===g)} fill={g==="A+"?"#16a34a":g==="A"?"#0f766e":g==="B"?"#2563eb":g==="C"?"#f59e0b":"#ef4444"} />)}</ScatterChart></ResponsiveContainer></Chart>
+
+{plSelection&&<section className="panel" style={{marginTop:16}}>
+  <div className="tabs">
+    <span className="active" style={{fontWeight:900}}>P:L DRILL-DOWN · {plSelection.name}</span>
+    <span className="tabCount">{selectedPLRows.length} strategies</span>
+    <button className="reset" style={{marginLeft:"auto"}} onClick={()=>setPlSelection(null)}>Clear P:L selection</button>
+  </div>
+  {selectedPLRows.length===0?<div style={{padding:20,color:"#61758e"}}>No strategies match this P:L range.</div>:
+  <div className="table">
+    <table>
+      <thead><tr>
+        <th>STOCK</th><th>EXPIRY</th><th>P:L</th><th>GRADE</th><th>SCORE</th>
+        <th>SELL</th><th>BUY</th><th>OTM</th><th>WIDTH</th><th>PROFIT/LOT</th>
+      </tr></thead>
+      <tbody>
+        {selectedPLRows.map((r,i)=><tr className={"clickable scoreRow "+gradeClass(r.GRADE)}
+          onClick={()=>openStrategy(r)}
+          key={r.STOCK+"-"+r.SELL+"-"+r.BUY+"-"+i}>
+          <td className="stock">{r.STOCK}</td>
+          <td>{r.EXPIRY||"—"}</td>
+          <td><b>1:{num(r["P:L"]).toFixed(2)}</b></td>
+          <td><Grade g={r.GRADE}/></td>
+          <td><b>{r.SCORE}</b></td>
+          <td>{integer(r.SELL)}</td>
+          <td>{integer(r.BUY)}</td>
+          <td>{num(r["OTM%"]).toFixed(2)}%</td>
+          <td>{integer(r.WIDTH)}</td>
+          <td className="profit">{money(r["PROFIT/LOT"])}</td>
+        </tr>)}
+      </tbody>
+    </table>
+  </div>}
+</section>}
 </section>
 </>}
 
+
+
+{selected&&scenario&&calc&&<div className="overlay" onClick={()=>setSelected(null)}><aside className="drawer" onClick={e=>e.stopPropagation()}>
+  <div className="drawerTop"><div><span className="pill dark">LIVE {isCall?"BEAR CALL":"BULL PUT"} SCENARIO</span><h2>{selected.STOCK}</h2><p>Scanner rank #{selected.RK} · dashboard score {selected.SCORE}{selected.EXPIRY&&" · "+selected.EXPIRY}</p></div><button className="close" onClick={()=>setSelected(null)}>×</button></div>
+  <div className="gradeBig"><Grade g={selected.GRADE}/><strong>{selected.SCORE}</strong><span>Opportunity score</span></div>
+  <div className="scenarioSection"><div className="sectionTitle">WHAT-IF WORKBENCH <span>all execution inputs editable · derived values recalculate instantly</span></div>
+    <div className="scenarioInputs fullScenario">
+      <label>Qty / Lots<input type="number" min="1" step="1" value={scenario.lots} onChange={e=>updateScenario("lots",e.target.value)}/><small>Total quantity: {integer(calc.quantity)}</small></label>
+      <label>Lot size<input type="number" min="1" step="1" value={scenario.lotSize} onChange={e=>updateScenario("lotSize",e.target.value)}/><small>Scanner: {integer(selected.LOT)}</small></label>
+      <label>Spot<input type="number" step=".05" value={scenario.spot} onChange={e=>updateScenario("spot",e.target.value)}/><small>Scanner: {money(selected.SPOT)}</small></label>
+      <label>Sell strike<input type="number" value={scenario.sellStrike} onChange={e=>updateScenario("sellStrike",e.target.value)}/><small>Scanner: {integer(selected.SELL)}</small></label>
+      <label>Buy strike<input type="number" value={scenario.buyStrike} onChange={e=>updateScenario("buyStrike",e.target.value)}/><small>Scanner: {integer(selected.BUY)}</small></label>
+      <label>Sell {optionSide} BID<input type="number" step=".01" value={scenario.sellBid} onChange={e=>{updateScenario("sellBid",e.target.value);updateScenario("sellPrice",e.target.value)}}/><small>Scanner: {money(selected.SELL_BID)}</small></label>
+      <label>Sell {optionSide} OFFER<input type="number" step=".01" value={scenario.sellOffer} onChange={e=>updateScenario("sellOffer",e.target.value)}/><small>Scanner: {money(selected.SELL_OFFER)}</small></label>
+      <label>Buy {optionSide} BID<input type="number" step=".01" value={scenario.buyBid} onChange={e=>updateScenario("buyBid",e.target.value)}/><small>Scanner: {money(selected.BUY_BID)}</small></label>
+      <label>Buy {optionSide} OFFER<input type="number" step=".01" value={scenario.buyOffer} onChange={e=>{updateScenario("buyOffer",e.target.value);updateScenario("buyPrice",e.target.value)}}/><small>Scanner: {money(selected.BUY_OFFER)}</small></label>
+      <label>Actual sell fill<input type="number" step=".01" value={scenario.sellPrice} onChange={e=>updateScenario("sellPrice",e.target.value)}/><small>Used for P/L calculation</small></label>
+      <label>Actual buy fill<input type="number" step=".01" value={scenario.buyPrice} onChange={e=>updateScenario("buyPrice",e.target.value)}/><small>Used for P/L calculation</small></label>
+    </div>
+    <button className="scenarioReset" onClick={()=>openStrategy(selected)}>↺ Reset to scanner values</button>
+  </div>
+  <div className="legs"><D k={isCall?"SELL CALL":"SELL PUT"} v={integer(calc.sellStrike)}/><D k={isCall?"BUY CALL":"BUY PUT"} v={integer(calc.buyStrike)}/><D k="WIDTH" v={money(calc.width)}/></div>
+  <div className="riskbar"><div><span>MAX PROFIT</span><b>{money(calc.maxProfit)}</b></div><div><span>MAX LOSS</span><b>{money(calc.maxLoss)}</b></div></div>
+  <div className="detailGrid"><D k="NET CREDIT" v={money(calc.credit)}/><D k="BREAKEVEN" v={money(calc.breakeven)}/><D k="OTM" v={calc.otm.toFixed(2)+"%"}/><D k="OTM PTS" v={calc.otmPts.toFixed(2)}/><D k="P:L" v={calc.pl>=0?"1:"+calc.pl.toFixed(2):"Invalid"}/><D k="TOTAL QTY" v={integer(calc.quantity)}/></div>
+  <div className="executionNote"><b>SCANNER VS WHAT-IF</b><span>Original CSV remains unchanged. This panel is temporary scenario analysis.</span><em>Default calculation uses SELL at bid and BUY at offer; actual fills can be overridden independently.</em></div>
+  <div className="why"><b>Live strategy analysis</b><p>Edit spot, strikes, bid/offer prices, actual fills, lot size or number of lots. Width, credit, OTM, breakeven, max profit, max loss and P:L recalculate automatically.</p></div>
+</aside></div>}
 
 <footer>Options Spread Workbench · Bull Put + Bear Call · local-only analytics</footer>
 </div>
