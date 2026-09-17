@@ -149,7 +149,6 @@ const qualified=useMemo(()=>ranked.filter(r=>applied.grades.includes(r.GRADE)),[
 const best=qualified.slice(0,topN);
 const allRows=useMemo(()=>[...matching].sort((a,b)=>a.RK-b.RK),[matching]);
 const completeColumns=[
-{key:"RK",label:"RK",group:"identity",value:r=>r.RK},
 {key:"STOCK",label:"STOCK",group:"identity",value:r=>r.STOCK},
 {key:"SPOT",label:"SPOT",group:"market",value:r=>r.SPOT},
 {key:"SELL",label:"SELL",group:"strikes",value:r=>r.SELL},
@@ -345,16 +344,15 @@ return <div className="app">
 
 <section className="panel">
 <div className="tabs"><button className={view==="best"?"active":""} onClick={()=>{setView("best");setPage(1)}}>⭐ Best Picks <span className="tabCount">{best.length}</span></button><button className={view==="all"?"active":""} onClick={()=>{setView("all");setPage(1)}}>☷ Complete CSV <span className="tabCount">{completeFiltered.length}</span></button><span className="hint">Complete CSV starts with every loaded strategy · column filters narrow this table · Apply Filters controls Best Picks</span></div>
-<div className="table">
-{view==="all"&&<div className="completeTableToolbar"><span><b>Complete CSV</b> · {completeFiltered.length} of {allRows.length} rows</span><button onClick={()=>setCompleteFilters({})}>Clear column filters</button><span className="filterHelp">Text = contains · numeric = exact or use &gt; / &lt; / &gt;= / &lt;=</span></div>}
-<table className={view==="all"?"completeTable":""}>
+<div className="table" style={{width:"100%",maxWidth:"100%",maxHeight:"68vh",overflowX:"auto",overflowY:"auto",boxSizing:"border-box",WebkitOverflowScrolling:"touch"}}>{view==="all"&&<div className="completeTableToolbar" style={{position:"sticky",top:0,zIndex:7}}><span><b>Complete CSV</b> · {completeFiltered.length} of {allRows.length} rows</span><button onClick={()=>setCompleteFilters({})}>Clear column filters</button><span className="filterHelp">Text = contains · numeric = exact or use &gt; / &lt; / &gt;= / &lt;=</span></div>}
+<table className={view==="all"?"completeTable":""} style={{width:"max-content",minWidth:"100%",tableLayout:"auto",whiteSpace:"nowrap"}}>
 <thead>
-<tr>{(view==="all"?completeColumns.map(c=>c.label):["RANK","STOCK","GRADE","SPOT","SELL","BUY","OTM","WIDTH","CREDIT","LOT","PROFIT/LOT","LOSS/LOT","BREAKEVEN","P:L"]).map((h,i)=><th key={h} className={view==="all"?`col-${completeColumns[i].group}`:""}>{h}</th>)}</tr>
-{view==="all"&&<tr className="columnFilterRow">{completeColumns.map(c=><th key={c.key} className={`col-${c.group}`}><input aria-label={`Filter ${c.label}`} value={completeFilters[c.key]||""} onChange={e=>{setCompleteFilters(x=>({...x,[c.key]:e.target.value}));setPage(1)}} placeholder="Filter…"/></th>)}</tr>}
+<tr style={{position:"sticky",top:view==="all"?42:0,zIndex:6}}>{(view==="all"?completeColumns.map(c=>c.label):["RANK","STOCK","GRADE","SPOT","SELL","BUY","OTM","WIDTH","CREDIT","LOT","PROFIT/LOT","LOSS/LOT","BREAKEVEN","P:L"]).map((h,i)=><th key={h} className={view==="all"?`col-${completeColumns[i].group}`:""}>{h}</th>)}</tr>
+{view==="all"&&<tr className="columnFilterRow" style={{position:"sticky",top:0,zIndex:5}}>{completeColumns.map(c=><th key={c.key} className={`col-${c.group}`}><input aria-label={`Filter ${c.label}`} value={completeFilters[c.key]||""} onChange={e=>{setCompleteFilters(x=>({...x,[c.key]:e.target.value}));setPage(1)}} placeholder="Filter…"/></th>)}</tr>}
 </thead>
 <tbody>{paged.map((r,i)=><tr className={"clickable scoreRow "+gradeClass(r.GRADE)} onClick={()=>openStrategy(r)} key={r.STOCK+"-"+r.SELL+"-"+r.BUY+"-"+i}>
 {view==="all"?<> 
-<td className="col-identity">{r.RK}</td><td className="stock col-identity">{r.STOCK}</td><td className="col-market">{money(r.SPOT)}</td><td className="col-strikes">{integer(r.SELL)}</td><td className="col-strikes">{integer(r.BUY)}</td><td className="col-quotes">{money(r.SELL_BID)}</td><td className="col-quotes">{money(r.SELL_OFFER)}</td><td className="col-quotes">{money(r.BUY_BID)}</td><td className="col-quotes">{money(r.BUY_OFFER)}</td><td className="col-metrics">{r["OTM%"].toFixed(2)}%</td><td className="col-metrics">{r["OTM PTS"].toFixed(2)}</td><td className="col-metrics">{integer(r.WIDTH)}</td><td className="col-economics">{money(r.CREDIT)}</td><td className="col-economics">{integer(r.LOT)}</td><td className="profit col-economics">{money(r["PROFIT/LOT"])}</td><td className="loss col-risk">{money(r["LOSS/LOT"])}</td><td className="col-risk">{money(r.BREAKEVEN)}</td><td className="col-risk"><b>1:{r["P:L"].toFixed(2)}</b></td><td className="col-dashboard"><Grade g={r.GRADE}/></td><td className="col-dashboard"><b>{r.SCORE}</b></td>
+<td className="stock col-identity">{r.STOCK}</td><td className="col-market">{money(r.SPOT)}</td><td className="col-strikes">{integer(r.SELL)}</td><td className="col-strikes">{integer(r.BUY)}</td><td className="col-quotes">{money(r.SELL_BID)}</td><td className="col-quotes">{money(r.SELL_OFFER)}</td><td className="col-quotes">{money(r.BUY_BID)}</td><td className="col-quotes">{money(r.BUY_OFFER)}</td><td className="col-metrics">{r["OTM%"].toFixed(2)}%</td><td className="col-metrics">{r["OTM PTS"].toFixed(2)}</td><td className="col-metrics">{integer(r.WIDTH)}</td><td className="col-economics">{money(r.CREDIT)}</td><td className="col-economics">{integer(r.LOT)}</td><td className="profit col-economics">{money(r["PROFIT/LOT"])}</td><td className="loss col-risk">{money(r["LOSS/LOT"])}</td><td className="col-risk">{money(r.BREAKEVEN)}</td><td className="col-risk"><b>1:{r["P:L"].toFixed(2)}</b></td><td className="col-dashboard"><Grade g={r.GRADE}/></td><td className="col-dashboard"><b>{r.SCORE}</b></td>
 </>:<><td><span className="rankBadge">{i+1}</span></td><td className="stock">{r.STOCK}</td><td><Grade g={r.GRADE}/></td><td>{money(r.SPOT)}</td><td>{integer(r.SELL)}</td><td>{integer(r.BUY)}</td><td>{r["OTM%"].toFixed(2)}%</td><td>{integer(r.WIDTH)}</td><td>{money(r.CREDIT)}</td><td>{integer(r.LOT)}</td><td className="profit">{money(r["PROFIT/LOT"])}</td><td className="loss">{money(r["LOSS/LOT"])}</td><td>{money(r.BREAKEVEN)}</td><td><b>1:{r["P:L"].toFixed(2)}</b></td></>}
 </tr>)}</tbody></table></div>
 {view==="all"&&<div className="pagination"><span>Showing <b>{displayed.length?((safePage-1)*pageSize+1):0}–{Math.min(safePage*pageSize,displayed.length)}</b> of <b>{displayed.length}</b></span><div><button disabled={safePage<=1} onClick={()=>setPage(safePage-1)}>← Prev</button><select value={pageSize} onChange={e=>{setPageSize(num(e.target.value));setPage(1)}}><option value="25">25 / page</option><option value="50">50 / page</option><option value="100">100 / page</option><option value="999999">All</option></select><button disabled={safePage>=totalPages} onClick={()=>setPage(safePage+1)}>Next →</button></div></div>}
@@ -367,9 +365,9 @@ return <div className="app">
     <button className="reset" onClick={()=>setPlSelection(null)}>Clear</button>
   </div>
   <div className="table">
-    {selectedPLRows.length?<table><thead><tr><th>RK</th><th>STOCK</th><th>GRADE</th><th>SPOT</th><th>SELL</th><th>BUY</th><th>OTM</th><th>WIDTH</th><th>CREDIT</th><th>PROFIT/LOT</th><th>LOSS/LOT</th><th>P:L</th></tr></thead>
+    {selectedPLRows.length?<table><thead><tr style={{position:"sticky",top:0,zIndex:5}}><th>STOCK</th><th>GRADE</th><th>SPOT</th><th>SELL</th><th>BUY</th><th>OTM</th><th>WIDTH</th><th>CREDIT</th><th>PROFIT/LOT</th><th>LOSS/LOT</th><th>P:L</th></tr></thead>
     <tbody>{selectedPLRows.map((r,i)=><tr className={"clickable scoreRow "+gradeClass(r.GRADE)} onClick={()=>openStrategy(r)} key={r.STOCK+"-"+r.SELL+"-"+r.BUY+"-pl-"+i}>
-      <td>{r.RK}</td><td className="stock">{r.STOCK}</td><td><Grade g={r.GRADE}/></td><td>{money(r.SPOT)}</td><td>{integer(r.SELL)}</td><td>{integer(r.BUY)}</td><td>{r["OTM%"].toFixed(2)}%</td><td>{integer(r.WIDTH)}</td><td>{money(r.CREDIT)}</td><td className="profit">{money(r["PROFIT/LOT"])}</td><td className="loss">{money(r["LOSS/LOT"])}</td><td><b>1:{r["P:L"].toFixed(2)}</b></td>
+      <td className="stock">{r.STOCK}</td><td><Grade g={r.GRADE}/></td><td>{money(r.SPOT)}</td><td>{integer(r.SELL)}</td><td>{integer(r.BUY)}</td><td>{r["OTM%"].toFixed(2)}%</td><td>{integer(r.WIDTH)}</td><td>{money(r.CREDIT)}</td><td className="profit">{money(r["PROFIT/LOT"])}</td><td className="loss">{money(r["LOSS/LOT"])}</td><td><b>1:{r["P:L"].toFixed(2)}</b></td>
     </tr>)}</tbody></table>:<div className="completeTableToolbar"><b>No matching strategies in this P:L range.</b></div>}
   </div>
 </section>}
@@ -388,8 +386,7 @@ return <div className="app">
     <button className="reset" style={{marginLeft:"auto"}} onClick={()=>setPlSelection(null)}>Clear P:L selection</button>
   </div>
   {selectedPLRows.length===0?<div style={{padding:20,color:"#61758e"}}>No strategies match this P:L range.</div>:
-  <div className="table">
-    <table>
+  <div className="table" style={{width:"100%",maxWidth:"100%",maxHeight:"55vh",overflowX:"auto",overflowY:"auto",boxSizing:"border-box",WebkitOverflowScrolling:"touch"}}><table style={{width:"max-content",minWidth:"100%",tableLayout:"auto",whiteSpace:"nowrap"}}>
       <thead><tr>
         <th>STOCK</th><th>EXPIRY</th><th>P:L</th><th>GRADE</th><th>SCORE</th>
         <th>SELL</th><th>BUY</th><th>OTM</th><th>WIDTH</th><th>PROFIT/LOT</th>
