@@ -247,6 +247,18 @@ instead of starting a duplicate process.
 
 ## Run A Scan
 
+To run a scan from Windows without opening the dashboard, set the expiry in
+`services/scanner/scan_config.json`, make sure `.env` has the EC2/AWS settings
+and a fresh `BREEZE_SESSION_TOKEN`, then run:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File scripts\run-scan.ps1
+```
+
+The script starts the local controller in the background if needed, submits the
+JSON configuration, waits for EC2 scanning to finish, and prints the downloaded
+report path. An alternate config can be supplied with `-ConfigPath`.
+
 After the dashboard opens:
 
 1. Enter a fresh Breeze session token in the scan panel.
