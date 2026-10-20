@@ -259,7 +259,7 @@ async function ensureSshAccess(cfg) {
   log(`✓ SSH access added for ${cidr}`);
 }
 
-async function ensureEc2Ready(cfg) {
+async function ensureEc2Ready(cfg, onInstanceStarted = () => {}) {
   const instanceId = process.env.BPS_EC2_INSTANCE_ID || cfg.instanceId || 'i-05a5ee6857acfb59f';
 
   const aws = awsCliPath();
@@ -288,6 +288,7 @@ async function ensureEc2Ready(cfg) {
     state.message = 'Starting EC2 instance';
     log('EC2 is stopped — starting instance...');
     await run(aws, ['ec2', 'start-instances', '--instance-ids', instanceId]);
+    onInstanceStarted(instanceId);
     log('✓ EC2 start requested');
   } else if (status === 'pending') {
     log('EC2 is already starting — waiting...');
@@ -428,7 +429,7 @@ async function stopEc2(instanceId) {
   log('✓ EC2 instance is stopped after successful scan');
 }
 
-async function doScan(cfg) {
+async function performScan(cfg, onInstanceStarted) {
   const meta = strategyMeta(cfg.strategy);
 
   const user = cfg.user || process.env.BPS_EC2_USER || 'ec2-user';
@@ -478,7 +479,7 @@ async function doScan(cfg) {
    * 10. Only after all Windows CSV work succeeds, stop EC2.
    */
 
-  const host = await ensureEc2Ready(cfg);
+  const host = await ensureEc2Ready(cfg, onInstanceStarted);
 
   // Refresh TCP/22 access for the current Windows public IP before SSH.
   await ensureSshAccess(cfg);
@@ -563,6 +564,30 @@ async function doScan(cfg) {
 
   state.status = 'complete';
   state.message = 'Scan complete';
+}
+
+async function doScan(cfg) {
+  const instanceId = process.env.BPS_EC2_INSTANCE_ID || cfg.instanceId || 'i-05a5ee6857acfb59f';
+  let startedByThisScan = false;
+
+  try {
+    await performScan(cfg, () => {
+      startedByThisScan = true;
+    });
+  } catch (error) {
+    if (startedByThisScan) {
+      log(`Scan failed after starting EC2; attempting shutdown of ${instanceId}...`);
+      try {
+        await stopEc2(instanceId);
+        log('✓ EC2 shut down after scan failure');
+      } catch (stopError) {
+        log(`✗ EC2 shutdown after scan failure also failed: ${stopError.message}`);
+        error.message = `${error.message} EC2 shutdown also failed: ${stopError.message}`;
+      }
+    }
+
+    throw error;
+  }
 }
 
 function uiConfig() {
